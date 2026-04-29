@@ -1,21 +1,22 @@
 #!/usr/bin/env python3
 """
-mpu6050_test.py
+pueba_sensores.py
 
-Prueba básica del sensor MPU6050 usando una Raspberry Pi por I2C.
+Prueba básica del sensor MAX30105 con Raspberry Pi Zero 2 W usando I2C.
 
 El programa:
 1. Abre el bus I2C de la Raspberry Pi.
-2. Verifica el registro WHO_AM_I del MPU6050.
-3. Inicializa acelerómetro y giroscopio.
-4. Lee aceleración, velocidad angular y temperatura.
-5. Muestra los datos en consola en tiempo real.
+2. Verifica que el MAX30105 responda leyendo PART_ID.
+3. Inicializa el sensor en modo Multi-LED.
+4. Lee datos crudos RED, IR y GREEN desde la FIFO.
+5. Muestra los datos en consola.
 
-Conexión típica:
-MPU6050 VCC -> Raspberry Pi 3.3 V
-MPU6050 GND -> Raspberry Pi GND
-MPU6050 SDA -> GPIO2 / SDA1
-MPU6050 SCL -> GPIO3 / SCL1
+Conexión:
+MAX30105 VIN/VCC -> Raspberry Pi 3.3 V
+MAX30105 GND     -> Raspberry Pi GND
+MAX30105 SDA     -> GPIO2 / SDA1 / Pin físico 3
+MAX30105 SCL     -> GPIO3 / SCL1 / Pin físico 5
+MAX30105 INT     -> No conectar por ahora
 """
 
 from __future__ import annotations
@@ -26,180 +27,203 @@ from dataclasses import dataclass
 from smbus2 import SMBus
 
 
-# Dirección I2C típica del MPU6050.
-# Si AD0 está conectado a GND, la dirección suele ser 0x68.
-# Si AD0 está conectado a 3.3 V, la dirección suele ser 0x69.
-MPU6050_DEFAULT_ADDRESS = 0x68
+# Dirección I2C de 7 bits del MAX30105.
+MAX30105_ADDRESS = 0x57
 
-# Registros principales del MPU6050.
-REG_SMPLRT_DIV = 0x19
-REG_CONFIG = 0x1A
-REG_GYRO_CONFIG = 0x1B
-REG_ACCEL_CONFIG = 0x1C
-REG_ACCEL_XOUT_H = 0x3B
-REG_PWR_MGMT_1 = 0x6B
-REG_WHO_AM_I = 0x75
+# Registros principales del MAX30105.
+REG_INTR_STATUS_1 = 0x00
+REG_INTR_STATUS_2 = 0x01
+REG_FIFO_WR_PTR = 0x04
+REG_OVF_COUNTER = 0x05
+REG_FIFO_RD_PTR = 0x06
+REG_FIFO_DATA = 0x07
+REG_FIFO_CONFIG = 0x08
+REG_MODE_CONFIG = 0x09
+REG_SPO2_CONFIG = 0x0A
+REG_LED1_PA = 0x0C      # LED rojo
+REG_LED2_PA = 0x0D      # LED infrarrojo
+REG_LED3_PA = 0x0E      # LED verde
+REG_MULTI_LED_CTRL1 = 0x11
+REG_MULTI_LED_CTRL2 = 0x12
+REG_PART_ID = 0xFF
 
-# Factores de escala para la configuración elegida:
-# Acelerómetro en ±2 g  -> 16384 LSB/g
-# Giroscopio en ±250 °/s -> 131 LSB/(°/s)
-ACCEL_SCALE_2G = 16384.0
-GYRO_SCALE_250_DPS = 131.0
+# Valor esperado del registro PART_ID para MAX30105.
+MAX30105_EXPECTED_PART_ID = 0x15
 
 
 @dataclass
-class MPU6050Sample:
-    """Estructura para almacenar una muestra del MPU6050."""
+class MAX30105Sample:
+    """Muestra cruda del MAX30105."""
 
-    ax_g: float
-    ay_g: float
-    az_g: float
-    gx_dps: float
-    gy_dps: float
-    gz_dps: float
-    temp_c: float
+    red: int
+    ir: int
+    green: int
 
 
-def combine_signed_16(msb: int, lsb: int) -> int:
+class MAX30105:
     """
-    Combina dos bytes en un entero de 16 bits con signo.
+    Driver mínimo para el MAX30105.
 
-    El MPU6050 entrega cada medición en dos registros:
-    - Byte alto: bits [15:8]
-    - Byte bajo: bits [7:0]
-
-    Los datos vienen en complemento a dos.
+    Este driver no calcula frecuencia cardíaca ni SpO2.
+    Solo prueba que el sensor responde y entrega muestras ópticas crudas.
     """
 
-    value = (msb << 8) | lsb
-
-    if value & 0x8000:
-        value -= 0x10000
-
-    return value
-
-
-class MPU6050:
-    """Driver mínimo para inicializar y leer el MPU6050 por I2C."""
-
-    def __init__(self, bus: SMBus, address: int = MPU6050_DEFAULT_ADDRESS) -> None:
+    def __init__(self, bus: SMBus, address: int = MAX30105_ADDRESS) -> None:
         self.bus = bus
         self.address = address
 
     def write_register(self, register: int, value: int) -> None:
-        """Escribe un byte en un registro del MPU6050."""
+        """Escribe un byte en un registro del MAX30105."""
         self.bus.write_byte_data(self.address, register, value)
 
     def read_register(self, register: int) -> int:
-        """Lee un byte desde un registro del MPU6050."""
+        """Lee un byte desde un registro del MAX30105."""
         return self.bus.read_byte_data(self.address, register)
 
-    def read_block(self, start_register: int, length: int) -> list[int]:
-        """Lee varios bytes consecutivos desde el MPU6050."""
-        return self.bus.read_i2c_block_data(self.address, start_register, length)
+    def read_block(self, register: int, length: int) -> list[int]:
+        """Lee varios bytes consecutivos desde un registro."""
+        return self.bus.read_i2c_block_data(self.address, register, length)
 
     def check_identity(self) -> int:
         """
-        Lee el registro WHO_AM_I.
+        Lee el registro PART_ID.
 
-        En un MPU6050 típico debe devolver 0x68.
+        En el MAX30105 debe devolver 0x15.
         """
-        return self.read_register(REG_WHO_AM_I)
+        return self.read_register(REG_PART_ID)
 
-    def initialize(self) -> None:
+    def clear_interrupts(self) -> None:
         """
-        Inicializa el MPU6050 con una configuración simple y estable.
+        Limpia banderas de interrupción leyendo los registros de estado.
 
-        Configuración:
-        - Despierta el sensor.
-        - Usa el giroscopio X como referencia de reloj.
-        - Activa filtro digital pasa-bajas.
-        - Configura frecuencia de muestreo aproximada de 100 Hz.
-        - Acelerómetro en ±2 g.
-        - Giroscopio en ±250 °/s.
+        En este programa no usamos el pin INT, pero limpiar estos registros
+        evita que queden banderas pendientes después del encendido.
         """
+        _ = self.read_register(REG_INTR_STATUS_1)
+        _ = self.read_register(REG_INTR_STATUS_2)
 
-        # Reset del dispositivo.
-        self.write_register(REG_PWR_MGMT_1, 0x80)
+    def reset(self) -> None:
+        """
+        Reinicia internamente el MAX30105.
+
+        El bit RESET está en el registro MODE_CONFIG.
+        """
+        self.write_register(REG_MODE_CONFIG, 0x40)
         time.sleep(0.100)
 
-        # Despertar el sensor y seleccionar reloj basado en giroscopio X.
-        # Bit SLEEP = 0, CLKSEL = 001.
-        self.write_register(REG_PWR_MGMT_1, 0x01)
-        time.sleep(0.100)
+    def reset_fifo(self) -> None:
+        """Reinicia punteros internos de la FIFO."""
+        self.write_register(REG_FIFO_WR_PTR, 0x00)
+        self.write_register(REG_OVF_COUNTER, 0x00)
+        self.write_register(REG_FIFO_RD_PTR, 0x00)
 
-        # Filtro digital pasa-bajas.
-        # 0x03 es una configuración razonable para reducir ruido.
-        self.write_register(REG_CONFIG, 0x03)
-
-        # Frecuencia de muestreo:
-        # Con DLPF activo, base aproximada de 1 kHz.
-        # sample_rate = 1000 / (1 + SMPLRT_DIV)
-        # Para 100 Hz: SMPLRT_DIV = 9.
-        self.write_register(REG_SMPLRT_DIV, 9)
-
-        # Giroscopio ±250 °/s.
-        # FS_SEL = 0.
-        self.write_register(REG_GYRO_CONFIG, 0x00)
-
-        # Acelerómetro ±2 g.
-        # AFS_SEL = 0.
-        self.write_register(REG_ACCEL_CONFIG, 0x00)
-
-        time.sleep(0.100)
-
-    def read_sample(self) -> MPU6050Sample:
+    def initialize(self, led_current: int = 0x24) -> None:
         """
-        Lee acelerómetro, temperatura y giroscopio.
+        Inicializa el MAX30105 para leer RED, IR y GREEN.
 
-        Desde ACCEL_XOUT_H se leen 14 bytes:
-        0-1: aceleración X
-        2-3: aceleración Y
-        4-5: aceleración Z
-        6-7: temperatura
-        8-9: giroscopio X
-        10-11: giroscopio Y
-        12-13: giroscopio Z
+        Configuración usada:
+        - FIFO con promedio de 4 muestras.
+        - Modo Multi-LED.
+        - RED en slot 1.
+        - IR en slot 2.
+        - GREEN en slot 3.
+        - Corriente moderada en los LEDs.
+
+        led_current:
+        - Valor de 0x00 a 0xFF.
+        - Para una primera prueba se usa 0x24, una corriente moderada.
         """
 
-        data = self.read_block(REG_ACCEL_XOUT_H, 14)
+        self.reset()
+        self.clear_interrupts()
+        self.reset_fifo()
 
-        ax_raw = combine_signed_16(data[0], data[1])
-        ay_raw = combine_signed_16(data[2], data[3])
-        az_raw = combine_signed_16(data[4], data[5])
+        # FIFO_CONFIG:
+        # Bits [7:5] SMP_AVE = 010 -> promedio de 4 muestras.
+        # Bit  [4]   FIFO_ROLLOVER_EN = 0 -> no sobrescribir si se llena.
+        # Bits [3:0] FIFO_A_FULL = 0000.
+        self.write_register(REG_FIFO_CONFIG, 0x40)
 
-        temp_raw = combine_signed_16(data[6], data[7])
+        # SPO2_CONFIG:
+        # Bits [6:5] ADC range = 01.
+        # Bits [4:2] sample rate = 001 -> 100 muestras/s.
+        # Bits [1:0] pulse width = 11 -> mayor resolución.
+        self.write_register(REG_SPO2_CONFIG, 0x27)
 
-        gx_raw = combine_signed_16(data[8], data[9])
-        gy_raw = combine_signed_16(data[10], data[11])
-        gz_raw = combine_signed_16(data[12], data[13])
+        # Corriente de los LEDs.
+        self.write_register(REG_LED1_PA, led_current)  # Rojo
+        self.write_register(REG_LED2_PA, led_current)  # Infrarrojo
+        self.write_register(REG_LED3_PA, led_current)  # Verde
 
-        ax_g = ax_raw / ACCEL_SCALE_2G
-        ay_g = ay_raw / ACCEL_SCALE_2G
-        az_g = az_raw / ACCEL_SCALE_2G
+        # Multi-LED mode control:
+        # SLOT1 = RED   -> 001
+        # SLOT2 = IR    -> 010
+        # SLOT3 = GREEN -> 011
+        # SLOT4 = NONE  -> 000
+        self.write_register(REG_MULTI_LED_CTRL1, 0x21)
+        self.write_register(REG_MULTI_LED_CTRL2, 0x03)
 
-        gx_dps = gx_raw / GYRO_SCALE_250_DPS
-        gy_dps = gy_raw / GYRO_SCALE_250_DPS
-        gz_dps = gz_raw / GYRO_SCALE_250_DPS
+        # MODE_CONFIG:
+        # MODE = 111 -> Multi-LED mode.
+        self.write_register(REG_MODE_CONFIG, 0x07)
 
-        temp_c = (temp_raw / 340.0) + 36.53
+        time.sleep(0.100)
 
-        return MPU6050Sample(
-            ax_g=ax_g,
-            ay_g=ay_g,
-            az_g=az_g,
-            gx_dps=gx_dps,
-            gy_dps=gy_dps,
-            gz_dps=gz_dps,
-            temp_c=temp_c,
-        )
+    def available_samples(self) -> int:
+        """
+        Calcula cuántas muestras hay disponibles en la FIFO.
+
+        La FIFO tiene 32 posiciones. Los punteros son de 5 bits.
+        """
+        write_ptr = self.read_register(REG_FIFO_WR_PTR)
+        read_ptr = self.read_register(REG_FIFO_RD_PTR)
+
+        samples = write_ptr - read_ptr
+
+        if samples < 0:
+            samples += 32
+
+        return samples
+
+    @staticmethod
+    def parse_18_bit_value(b1: int, b2: int, b3: int) -> int:
+        """
+        Convierte tres bytes de la FIFO en una medición de 18 bits.
+
+        Cada canal óptico del MAX30105 se almacena en 3 bytes.
+        Solo los 18 bits menos significativos son datos válidos.
+        """
+        return ((b1 << 16) | (b2 << 8) | b3) & 0x3FFFF
+
+    def read_sample(self) -> MAX30105Sample | None:
+        """
+        Lee una muestra RED, IR y GREEN desde la FIFO.
+
+        En modo Multi-LED con 3 LEDs:
+        - RED usa 3 bytes.
+        - IR usa 3 bytes.
+        - GREEN usa 3 bytes.
+
+        Total: 9 bytes por muestra.
+        """
+
+        if self.available_samples() == 0:
+            return None
+
+        data = self.read_block(REG_FIFO_DATA, 9)
+
+        red = self.parse_18_bit_value(data[0], data[1], data[2])
+        ir = self.parse_18_bit_value(data[3], data[4], data[5])
+        green = self.parse_18_bit_value(data[6], data[7], data[8])
+
+        return MAX30105Sample(red=red, ir=ir, green=green)
 
 
 def parse_arguments() -> argparse.Namespace:
     """Procesa argumentos de línea de comandos."""
 
     parser = argparse.ArgumentParser(
-        description="Prueba del MPU6050 en Raspberry Pi usando I2C."
+        description="Prueba del MAX30105 en Raspberry Pi usando I2C."
     )
 
     parser.add_argument(
@@ -212,8 +236,8 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--address",
         type=lambda value: int(value, 0),
-        default=MPU6050_DEFAULT_ADDRESS,
-        help="Dirección I2C del MPU6050. Ejemplo: 0x68 o 0x69.",
+        default=MAX30105_ADDRESS,
+        help="Dirección I2C del MAX30105. Normalmente es 0x57.",
     )
 
     parser.add_argument(
@@ -230,6 +254,13 @@ def parse_arguments() -> argparse.Namespace:
         help="Duración de la prueba en segundos. 0 significa ejecución infinita.",
     )
 
+    parser.add_argument(
+        "--led-current",
+        type=lambda value: int(value, 0),
+        default=0x24,
+        help="Corriente de LEDs como valor hexadecimal. Ejemplo: 0x1F, 0x24, 0x3F.",
+    )
+
     return parser.parse_args()
 
 
@@ -241,36 +272,36 @@ def main() -> None:
     if args.rate <= 0:
         raise ValueError("La frecuencia --rate debe ser mayor que cero.")
 
+    if not 0x00 <= args.led_current <= 0xFF:
+        raise ValueError("El valor --led-current debe estar entre 0x00 y 0xFF.")
+
     period_s = 1.0 / args.rate
 
-    print("Iniciando prueba del MPU6050")
+    print("Iniciando prueba del MAX30105")
     print(f"Bus I2C: /dev/i2c-{args.bus}")
     print(f"Dirección I2C: 0x{args.address:02X}")
+    print(f"Corriente LED configurada: 0x{args.led_current:02X}")
     print("Presiona Ctrl+C para detener.\n")
 
     try:
         with SMBus(args.bus) as bus:
-            mpu = MPU6050(bus=bus, address=args.address)
+            sensor = MAX30105(bus=bus, address=args.address)
 
-            who_am_i = mpu.check_identity()
-            print(f"WHO_AM_I leído: 0x{who_am_i:02X}")
+            part_id = sensor.check_identity()
+            print(f"PART_ID leído: 0x{part_id:02X}")
 
-            if who_am_i != 0x68:
+            if part_id != MAX30105_EXPECTED_PART_ID:
                 print(
-                    "Advertencia: WHO_AM_I no devolvió 0x68. "
-                    "Verifica dirección I2C, cableado y alimentación."
+                    "Advertencia: PART_ID no coincide con 0x15. "
+                    "Verifica si el sensor es realmente MAX30105, "
+                    "si la dirección I2C es correcta o si el cableado está bien."
                 )
 
-            mpu.initialize()
-            print("MPU6050 inicializado correctamente.\n")
+            sensor.initialize(led_current=args.led_current)
+            print("MAX30105 inicializado correctamente.\n")
 
-            print(
-                "Tiempo[s] | "
-                "Ax[g]     Ay[g]     Az[g]     | "
-                "Gx[°/s]   Gy[°/s]   Gz[°/s]   | "
-                "Temp[°C]"
-            )
-            print("-" * 86)
+            print("Tiempo[s] | RED       IR        GREEN")
+            print("-" * 44)
 
             start_time = time.monotonic()
 
@@ -280,14 +311,15 @@ def main() -> None:
                 if args.duration > 0 and elapsed_s >= args.duration:
                     break
 
-                sample = mpu.read_sample()
+                sample = sensor.read_sample()
 
-                print(
-                    f"{elapsed_s:8.2f} | "
-                    f"{sample.ax_g:8.3f} {sample.ay_g:8.3f} {sample.az_g:8.3f} | "
-                    f"{sample.gx_dps:8.3f} {sample.gy_dps:8.3f} {sample.gz_dps:8.3f} | "
-                    f"{sample.temp_c:8.2f}"
-                )
+                if sample is not None:
+                    print(
+                        f"{elapsed_s:8.2f} | "
+                        f"{sample.red:8d} "
+                        f"{sample.ir:8d} "
+                        f"{sample.green:8d}"
+                    )
 
                 time.sleep(period_s)
 
@@ -300,11 +332,11 @@ def main() -> None:
     except OSError as error:
         print("Error de comunicación I2C.")
         print("Posibles causas:")
-        print("- El MPU6050 no está conectado correctamente.")
+        print("- El MAX30105 no está conectado correctamente.")
         print("- I2C no está habilitado.")
-        print("- La dirección I2C no es 0x68 sino 0x69.")
-        print("- SDA o SCL están invertidos.")
+        print("- SDA y SCL están invertidos.")
         print("- El sensor no está alimentado.")
+        print("- La dirección I2C no es 0x57.")
         print(f"Detalle técnico: {error}")
 
     except KeyboardInterrupt:
