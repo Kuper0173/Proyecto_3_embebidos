@@ -2,21 +2,21 @@
 """
 pueba_sensores.py
 
-Prueba básica del sensor MAX30105 con Raspberry Pi Zero 2 W usando I2C.
+Prueba estable para sensores MAX30102 / MAX30105 usando Raspberry Pi Zero 2 W.
 
-El programa:
-1. Abre el bus I2C de la Raspberry Pi.
-2. Verifica que el MAX30105 responda leyendo PART_ID.
-3. Inicializa el sensor en modo Multi-LED.
-4. Lee datos crudos RED, IR y GREEN desde la FIFO.
-5. Muestra los datos en consola.
+Este programa:
+1. Abre el bus I2C.
+2. Verifica el PART_ID del sensor.
+3. Configura el sensor en modo SpO2: RED + IR.
+4. Lee datos crudos desde la FIFO.
+5. Muestra RED e IR en consola.
 
 Conexión:
-MAX30105 VIN/VCC -> Raspberry Pi 3.3 V
-MAX30105 GND     -> Raspberry Pi GND
-MAX30105 SDA     -> GPIO2 / SDA1 / Pin físico 3
-MAX30105 SCL     -> GPIO3 / SCL1 / Pin físico 5
-MAX30105 INT     -> No conectar por ahora
+VIN/VCC -> 3.3 V
+GND     -> GND
+SDA     -> GPIO2 / Pin físico 3
+SCL     -> GPIO3 / Pin físico 5
+INT     -> No conectar por ahora
 """
 
 from __future__ import annotations
@@ -27,10 +27,8 @@ from dataclasses import dataclass
 from smbus2 import SMBus
 
 
-# Dirección I2C de 7 bits del MAX30105.
-MAX30105_ADDRESS = 0x57
+MAX3010X_ADDRESS = 0x57
 
-# Registros principales del MAX30105.
 REG_INTR_STATUS_1 = 0x00
 REG_INTR_STATUS_2 = 0x01
 REG_FIFO_WR_PTR = 0x04
@@ -40,98 +38,79 @@ REG_FIFO_DATA = 0x07
 REG_FIFO_CONFIG = 0x08
 REG_MODE_CONFIG = 0x09
 REG_SPO2_CONFIG = 0x0A
-REG_LED1_PA = 0x0C      # LED rojo
-REG_LED2_PA = 0x0D      # LED infrarrojo
-REG_LED3_PA = 0x0E      # LED verde
-REG_MULTI_LED_CTRL1 = 0x11
-REG_MULTI_LED_CTRL2 = 0x12
+REG_LED1_PA = 0x0C      # RED LED
+REG_LED2_PA = 0x0D      # IR LED
 REG_PART_ID = 0xFF
 
-# Valor esperado del registro PART_ID para MAX30105.
-MAX30105_EXPECTED_PART_ID = 0x15
+EXPECTED_PART_ID = 0x15
 
 
 @dataclass
-class MAX30105Sample:
-    """Muestra cruda del MAX30105."""
+class OpticalSample:
+    """Muestra óptica cruda del sensor."""
 
     red: int
     ir: int
-    green: int
 
 
-class MAX30105:
+class MAX3010X:
     """
-    Driver mínimo para el MAX30105.
+    Driver mínimo para MAX30102 / MAX30105.
 
-    Este driver no calcula frecuencia cardíaca ni SpO2.
-    Solo prueba que el sensor responde y entrega muestras ópticas crudas.
+    Este código no calcula frecuencia cardíaca ni SpO2.
+    Solo verifica comunicación I2C y lectura de señales RED/IR.
     """
 
-    def __init__(self, bus: SMBus, address: int = MAX30105_ADDRESS) -> None:
+    def __init__(self, bus: SMBus, address: int = MAX3010X_ADDRESS) -> None:
         self.bus = bus
         self.address = address
 
     def write_register(self, register: int, value: int) -> None:
-        """Escribe un byte en un registro del MAX30105."""
+        """Escribe un byte en un registro del sensor."""
         self.bus.write_byte_data(self.address, register, value)
 
     def read_register(self, register: int) -> int:
-        """Lee un byte desde un registro del MAX30105."""
+        """Lee un byte desde un registro del sensor."""
         return self.bus.read_byte_data(self.address, register)
 
     def read_block(self, register: int, length: int) -> list[int]:
-        """Lee varios bytes consecutivos desde un registro."""
+        """Lee varios bytes consecutivos desde el sensor."""
         return self.bus.read_i2c_block_data(self.address, register, length)
 
     def check_identity(self) -> int:
-        """
-        Lee el registro PART_ID.
-
-        En el MAX30105 debe devolver 0x15.
-        """
+        """Lee el registro PART_ID."""
         return self.read_register(REG_PART_ID)
 
     def clear_interrupts(self) -> None:
         """
-        Limpia banderas de interrupción leyendo los registros de estado.
+        Limpia banderas internas de interrupción.
 
-        En este programa no usamos el pin INT, pero limpiar estos registros
-        evita que queden banderas pendientes después del encendido.
+        Aunque no usamos el pin INT, leer estos registros limpia estados pendientes.
         """
         _ = self.read_register(REG_INTR_STATUS_1)
         _ = self.read_register(REG_INTR_STATUS_2)
 
     def reset(self) -> None:
-        """
-        Reinicia internamente el MAX30105.
-
-        El bit RESET está en el registro MODE_CONFIG.
-        """
+        """Reinicia internamente el sensor."""
         self.write_register(REG_MODE_CONFIG, 0x40)
         time.sleep(0.100)
 
     def reset_fifo(self) -> None:
-        """Reinicia punteros internos de la FIFO."""
+        """Reinicia los punteros de la FIFO."""
         self.write_register(REG_FIFO_WR_PTR, 0x00)
         self.write_register(REG_OVF_COUNTER, 0x00)
         self.write_register(REG_FIFO_RD_PTR, 0x00)
 
     def initialize(self, led_current: int = 0x24) -> None:
         """
-        Inicializa el MAX30105 para leer RED, IR y GREEN.
+        Inicializa el sensor en modo RED + IR.
 
-        Configuración usada:
+        Configuración:
         - FIFO con promedio de 4 muestras.
-        - Modo Multi-LED.
-        - RED en slot 1.
-        - IR en slot 2.
-        - GREEN en slot 3.
-        - Corriente moderada en los LEDs.
-
-        led_current:
-        - Valor de 0x00 a 0xFF.
-        - Para una primera prueba se usa 0x24, una corriente moderada.
+        - FIFO rollover activado para evitar bloqueo si se llena.
+        - Modo SpO2: RED + IR.
+        - Frecuencia de muestreo aproximada: 50 muestras/s.
+        - Ancho de pulso alto para mayor resolución.
         """
 
         self.reset()
@@ -139,39 +118,30 @@ class MAX30105:
         self.reset_fifo()
 
         # FIFO_CONFIG:
-        # Bits [7:5] SMP_AVE = 010 -> promedio de 4 muestras.
-        # Bit  [4]   FIFO_ROLLOVER_EN = 0 -> no sobrescribir si se llena.
-        # Bits [3:0] FIFO_A_FULL = 0000.
-        self.write_register(REG_FIFO_CONFIG, 0x40)
+        # Bits [7:5] = 010 -> promedio de 4 muestras.
+        # Bit  [4]   = 1   -> FIFO rollover habilitado.
+        # Bits [3:0] = 0000.
+        self.write_register(REG_FIFO_CONFIG, 0x50)
 
         # SPO2_CONFIG:
-        # Bits [6:5] ADC range = 01.
-        # Bits [4:2] sample rate = 001 -> 100 muestras/s.
-        # Bits [1:0] pulse width = 11 -> mayor resolución.
-        self.write_register(REG_SPO2_CONFIG, 0x27)
+        # Bits [6:5] = 01  -> rango ADC moderado.
+        # Bits [4:2] = 000 -> 50 muestras/s.
+        # Bits [1:0] = 11  -> ancho de pulso alto.
+        self.write_register(REG_SPO2_CONFIG, 0x23)
 
-        # Corriente de los LEDs.
-        self.write_register(REG_LED1_PA, led_current)  # Rojo
-        self.write_register(REG_LED2_PA, led_current)  # Infrarrojo
-        self.write_register(REG_LED3_PA, led_current)  # Verde
-
-        # Multi-LED mode control:
-        # SLOT1 = RED   -> 001
-        # SLOT2 = IR    -> 010
-        # SLOT3 = GREEN -> 011
-        # SLOT4 = NONE  -> 000
-        self.write_register(REG_MULTI_LED_CTRL1, 0x21)
-        self.write_register(REG_MULTI_LED_CTRL2, 0x03)
+        # Corriente de LEDs.
+        self.write_register(REG_LED1_PA, led_current)  # RED
+        self.write_register(REG_LED2_PA, led_current)  # IR
 
         # MODE_CONFIG:
-        # MODE = 111 -> Multi-LED mode.
-        self.write_register(REG_MODE_CONFIG, 0x07)
+        # 0x03 -> modo SpO2, usa RED + IR.
+        self.write_register(REG_MODE_CONFIG, 0x03)
 
         time.sleep(0.100)
 
     def available_samples(self) -> int:
         """
-        Calcula cuántas muestras hay disponibles en la FIFO.
+        Calcula cuántas muestras completas hay disponibles en FIFO.
 
         La FIFO tiene 32 posiciones. Los punteros son de 5 bits.
         """
@@ -188,56 +158,69 @@ class MAX30105:
     @staticmethod
     def parse_18_bit_value(b1: int, b2: int, b3: int) -> int:
         """
-        Convierte tres bytes de la FIFO en una medición de 18 bits.
+        Convierte tres bytes en un valor de 18 bits.
 
-        Cada canal óptico del MAX30105 se almacena en 3 bytes.
-        Solo los 18 bits menos significativos son datos válidos.
+        Cada canal óptico se entrega como 3 bytes.
+        Solo los 18 bits menos significativos son válidos.
         """
         return ((b1 << 16) | (b2 << 8) | b3) & 0x3FFFF
 
-    def read_sample(self) -> MAX30105Sample | None:
+    def read_sample(self) -> OpticalSample:
         """
-        Lee una muestra RED, IR y GREEN desde la FIFO.
+        Lee una muestra RED + IR desde la FIFO.
 
-        En modo Multi-LED con 3 LEDs:
+        En modo SpO2:
         - RED usa 3 bytes.
         - IR usa 3 bytes.
-        - GREEN usa 3 bytes.
 
-        Total: 9 bytes por muestra.
+        Total: 6 bytes por muestra.
         """
-
-        if self.available_samples() == 0:
-            return None
-
-        data = self.read_block(REG_FIFO_DATA, 9)
+        data = self.read_block(REG_FIFO_DATA, 6)
 
         red = self.parse_18_bit_value(data[0], data[1], data[2])
         ir = self.parse_18_bit_value(data[3], data[4], data[5])
-        green = self.parse_18_bit_value(data[6], data[7], data[8])
 
-        return MAX30105Sample(red=red, ir=ir, green=green)
+        return OpticalSample(red=red, ir=ir)
+
+    def read_latest_sample(self) -> OpticalSample | None:
+        """
+        Lee todas las muestras pendientes y devuelve la más reciente.
+
+        Esto evita que la FIFO se llene si el sensor mide más rápido
+        que la velocidad de impresión en consola.
+        """
+        samples_available = self.available_samples()
+
+        if samples_available == 0:
+            return None
+
+        latest_sample = None
+
+        for _ in range(samples_available):
+            latest_sample = self.read_sample()
+
+        return latest_sample
 
 
 def parse_arguments() -> argparse.Namespace:
     """Procesa argumentos de línea de comandos."""
 
     parser = argparse.ArgumentParser(
-        description="Prueba del MAX30105 en Raspberry Pi usando I2C."
+        description="Prueba estable del MAX30102 / MAX30105 por I2C."
     )
 
     parser.add_argument(
         "--bus",
         type=int,
         default=1,
-        help="Número del bus I2C. En Raspberry Pi normalmente es 1.",
+        help="Bus I2C. En Raspberry Pi normalmente es 1.",
     )
 
     parser.add_argument(
         "--address",
         type=lambda value: int(value, 0),
-        default=MAX30105_ADDRESS,
-        help="Dirección I2C del MAX30105. Normalmente es 0x57.",
+        default=MAX3010X_ADDRESS,
+        help="Dirección I2C del sensor. Normalmente 0x57.",
     )
 
     parser.add_argument(
@@ -251,21 +234,21 @@ def parse_arguments() -> argparse.Namespace:
         "--duration",
         type=float,
         default=0.0,
-        help="Duración de la prueba en segundos. 0 significa ejecución infinita.",
+        help="Duración en segundos. 0 significa ejecución infinita.",
     )
 
     parser.add_argument(
         "--led-current",
         type=lambda value: int(value, 0),
         default=0x24,
-        help="Corriente de LEDs como valor hexadecimal. Ejemplo: 0x1F, 0x24, 0x3F.",
+        help="Corriente de LEDs. Ejemplos: 0x1F, 0x24, 0x3F.",
     )
 
     return parser.parse_args()
 
 
 def main() -> None:
-    """Función principal del programa."""
+    """Función principal."""
 
     args = parse_arguments()
 
@@ -277,31 +260,30 @@ def main() -> None:
 
     period_s = 1.0 / args.rate
 
-    print("Iniciando prueba del MAX30105")
+    print("Iniciando prueba MAX30102 / MAX30105")
     print(f"Bus I2C: /dev/i2c-{args.bus}")
     print(f"Dirección I2C: 0x{args.address:02X}")
-    print(f"Corriente LED configurada: 0x{args.led_current:02X}")
+    print(f"Corriente LED: 0x{args.led_current:02X}")
     print("Presiona Ctrl+C para detener.\n")
 
     try:
         with SMBus(args.bus) as bus:
-            sensor = MAX30105(bus=bus, address=args.address)
+            sensor = MAX3010X(bus=bus, address=args.address)
 
             part_id = sensor.check_identity()
             print(f"PART_ID leído: 0x{part_id:02X}")
 
-            if part_id != MAX30105_EXPECTED_PART_ID:
+            if part_id != EXPECTED_PART_ID:
                 print(
                     "Advertencia: PART_ID no coincide con 0x15. "
-                    "Verifica si el sensor es realmente MAX30105, "
-                    "si la dirección I2C es correcta o si el cableado está bien."
+                    "Revisa el modelo exacto del sensor o la conexión I2C."
                 )
 
             sensor.initialize(led_current=args.led_current)
-            print("MAX30105 inicializado correctamente.\n")
+            print("Sensor inicializado correctamente.\n")
 
-            print("Tiempo[s] | RED       IR        GREEN")
-            print("-" * 44)
+            print("Tiempo[s] | RED        IR")
+            print("-" * 34)
 
             start_time = time.monotonic()
 
@@ -311,14 +293,13 @@ def main() -> None:
                 if args.duration > 0 and elapsed_s >= args.duration:
                     break
 
-                sample = sensor.read_sample()
+                sample = sensor.read_latest_sample()
 
                 if sample is not None:
                     print(
                         f"{elapsed_s:8.2f} | "
                         f"{sample.red:8d} "
-                        f"{sample.ir:8d} "
-                        f"{sample.green:8d}"
+                        f"{sample.ir:8d}"
                     )
 
                 time.sleep(period_s)
@@ -332,9 +313,9 @@ def main() -> None:
     except OSError as error:
         print("Error de comunicación I2C.")
         print("Posibles causas:")
-        print("- El MAX30105 no está conectado correctamente.")
-        print("- I2C no está habilitado.")
+        print("- El sensor no está conectado correctamente.")
         print("- SDA y SCL están invertidos.")
+        print("- I2C no está habilitado.")
         print("- El sensor no está alimentado.")
         print("- La dirección I2C no es 0x57.")
         print(f"Detalle técnico: {error}")
