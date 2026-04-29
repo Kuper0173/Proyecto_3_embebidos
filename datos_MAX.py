@@ -598,10 +598,9 @@ def main() -> None:
 
     print(
         "Tiempo[s] | "
-        "RED      IR       | "
-        "FC[bpm]  SpO2[%]  R       Calidad[%]  Dedo"
+        "FC[bpm]  SpO2[%]  Dedo"
     )
-    print("-" * 82)
+    print("-" * 36)
 
     print_period_s = 1.0 / args.print_rate
     last_print_time = 0.0
@@ -641,15 +640,12 @@ def main() -> None:
 
                     fc_text = format_optional_float(processed.heart_rate_bpm, width=7, decimals=1)
                     spo2_text = format_optional_float(processed.spo2_percent, width=7, decimals=1)
-                    r_text = format_optional_float(processed.ratio_r, width=6, decimals=3)
 
                     finger_text = "SI" if processed.finger_detected else "NO"
 
                     print(
                         f"{elapsed_s:8.2f} | "
-                        f"{processed.red_raw:7d} {processed.ir_raw:7d} | "
-                        f"{fc_text}  {spo2_text}  {r_text}  "
-                        f"{processed.signal_quality:10.1f}  {finger_text}"
+                        f"{fc_text}  {spo2_text}  {finger_text}"
                     )
 
                     last_print_time = now
