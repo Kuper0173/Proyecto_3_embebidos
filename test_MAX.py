@@ -17,6 +17,8 @@ GND     -> GND
 SDA     -> GPIO2 / Pin físico 3
 SCL     -> GPIO3 / Pin físico 5
 INT     -> No conectar por ahora
+
+hola, estamos aprendiendo
 """
 
 from __future__ import annotations
