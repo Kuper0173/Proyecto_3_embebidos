@@ -58,8 +58,20 @@ rule9  = ctrl.Rule(spo2['critico'],                                             
 rule10 = ctrl.Rule(spo2['peligroso'] & hr['taquicardia'] & movimiento['nulo'],   riesgo['critico'])
 rule11 = ctrl.Rule(spo2['peligroso'] & hr['bradicardia'],                        riesgo['critico'])
 
-riesgo_ctrl      = ctrl.ControlSystem([rule1, rule2, rule3, rule4, rule5,
-                                        rule6, rule7, rule8, rule9, rule10, rule11])
+# Reglas adicionales de cobertura (evitan KeyError en zonas sin activacion)
+# Sincronizdas con main_apnea.py rule12-rule17
+rule12 = ctrl.Rule(hr['bradicardia'],                                            riesgo['moderado'])
+rule13 = ctrl.Rule(hr['taquicardia'] & movimiento['nulo'],                       riesgo['moderado'])
+rule14 = ctrl.Rule(hr['taquicardia'] & movimiento['leve'],                       riesgo['leve'])
+rule15 = ctrl.Rule(hr['elevada'],                                                riesgo['leve'])
+rule16 = ctrl.Rule(spo2['peligroso'],                                            riesgo['moderado'])
+rule17 = ctrl.Rule(spo2['normal']    & movimiento['normal'],                     riesgo['leve'])
+
+riesgo_ctrl      = ctrl.ControlSystem([
+    rule1, rule2, rule3, rule4, rule5,
+    rule6, rule7, rule8, rule9, rule10, rule11,
+    rule12, rule13, rule14, rule15, rule16, rule17
+])
 riesgo_simulador = ctrl.ControlSystemSimulation(riesgo_ctrl)
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -247,8 +259,13 @@ while True:
         riesgo_simulador.input['spo2']       = v_spo2
         riesgo_simulador.input['hr']         = v_hr
         riesgo_simulador.input['movimiento'] = v_mov
-        riesgo_simulador.compute()
-        nivel = riesgo_simulador.output['riesgo']
+        try:
+            riesgo_simulador.compute()
+            nivel = riesgo_simulador.output['riesgo']
+        except KeyError:
+            print("  [ADVERTENCIA] Combinacion de valores fuera de cobertura de reglas.")
+            print("  Ninguna regla se activo con suficiente fuerza. Riesgo asumido: 50.0")
+            nivel = 50.0
 
         # Nivel de alerta (replica Prolog)
         color, mensaje = nivel_a_alerta(nivel)
