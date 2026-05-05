@@ -14,34 +14,69 @@ movimiento = ctrl.Antecedent(np.arange(0, 11, 1), 'movimiento')
 
 riesgo = ctrl.Consequent(np.arange(0, 101, 1), 'riesgo')
 
-# Funciones de membresía para SpO2 (%)
-spo2['peligroso'] = fuzz.trapmf(spo2.universe, [50, 50, 85, 90])
-spo2['moderado'] = fuzz.trimf(spo2.universe, [85, 92, 95])
-spo2['normal'] = fuzz.trapmf(spo2.universe, [92, 95, 100, 100])
+# ── SpO2 (%) ────────────────────────────────────────────────────────────────
+# Referencia clínica durante el sueño:
+#   critico   : < 85%  → hipoxia severa, emergencia inmediata
+#   peligroso : 85–90% → desaturación moderada (apnea significativa)
+#   moderado  : 90–94% → desaturación leve (apnea leve / hipopnea)
+#   normal    : ≥ 95%  → saturación saludable
+spo2['critico']   = fuzz.trapmf(spo2.universe, [50, 50, 83, 86])
+spo2['peligroso'] = fuzz.trimf (spo2.universe, [83, 87, 91])
+spo2['moderado']  = fuzz.trimf (spo2.universe, [89, 92, 95])
+spo2['normal']    = fuzz.trapmf(spo2.universe, [93, 95, 100, 100])
 
-# Funciones de membresía para Frecuencia Cardíaca (BPM)
-hr['bajo'] = fuzz.trapmf(hr.universe, [30, 30, 50, 60])
-hr['normal'] = fuzz.trapmf(hr.universe, [55, 65, 90, 100])
-hr['alto'] = fuzz.trapmf(hr.universe, [95, 110, 150, 150])
+# ── Frecuencia Cardíaca (BPM) ────────────────────────────────────────────────
+# Referencia clínica durante el sueño:
+#   bradicardia : < 40 BPM  → peligroso (bloqueo o hipoxia profunda)
+#   normal      : 40–70 BPM → fisiológico en sueño (incluso en atletas)
+#   elevada     : 70–90 BPM → posible arousal o estrés respiratorio
+#   taquicardia : > 88 BPM  → respuesta simpática a apnea
+hr['bradicardia'] = fuzz.trapmf(hr.universe, [30, 30, 38, 45])
+hr['normal']      = fuzz.trapmf(hr.universe, [40, 50, 65, 72])
+hr['elevada']     = fuzz.trimf (hr.universe, [68, 80, 92])
+hr['taquicardia'] = fuzz.trapmf(hr.universe, [88, 98, 150, 150])
 
-# Funciones de membresía para Movimiento
-movimiento['nulo'] = fuzz.trimf(movimiento.universe, [0, 0, 3])
-movimiento['leve'] = fuzz.trimf(movimiento.universe, [2, 5, 8])
+# ── Movimiento ───────────────────────────────────────────────────────────────
+# Escala 0-10 (0 = sin movimiento, 10 = movimiento intenso)
+# Durante sueño normal el movimiento es mínimo; agitación indica despertar o apnea
+movimiento['nulo']   = fuzz.trimf(movimiento.universe, [0, 0, 3])
+movimiento['leve']   = fuzz.trimf(movimiento.universe, [2, 5, 8])
 movimiento['normal'] = fuzz.trimf(movimiento.universe, [7, 10, 10])
 
-# Funciones de membresía para el Riesgo
-riesgo['bajo'] = fuzz.trimf(riesgo.universe, [0, 0, 35])
-riesgo['medio'] = fuzz.trimf(riesgo.universe, [20, 50, 80])
-riesgo['alto'] = fuzz.trapmf(riesgo.universe, [65, 85, 100, 100])
+# ── Riesgo (salida) — 4 niveles de alerta ────────────────────────────────────
+#   normal   : 0–25   → sin eventos detectados
+#   leve     : 15–55  → hipopnea o desaturación leve
+#   moderado : 45–80  → apnea moderada, requiere atención
+#   critico  : 70–100 → apnea severa / emergencia
+riesgo['normal']   = fuzz.trapmf(riesgo.universe, [0,  0,  15, 25])
+riesgo['leve']     = fuzz.trimf (riesgo.universe, [15, 35, 55])
+riesgo['moderado'] = fuzz.trimf (riesgo.universe, [45, 62, 78])
+riesgo['critico']  = fuzz.trapmf(riesgo.universe, [70, 85, 100, 100])
 
-# Reglas difusas
-rule1 = ctrl.Rule(spo2['normal'] & hr['normal'] & movimiento['normal'], riesgo['bajo'])
-rule2 = ctrl.Rule(spo2['moderado'] | hr['bajo'], riesgo['medio'])
-rule3 = ctrl.Rule(spo2['peligroso'] & hr['alto'] & movimiento['nulo'], riesgo['alto'])
-rule4 = ctrl.Rule(spo2['peligroso'] & movimiento['nulo'], riesgo['alto'])
-rule5 = ctrl.Rule(spo2['peligroso'] & hr['bajo'], riesgo['alto'])
+# ── Reglas difusas (10 reglas para cubrir los 4 niveles) ─────────────────────
+# Nivel NORMAL — todo dentro de rangos de sueño saludable
+rule1 = ctrl.Rule(spo2['normal']    & hr['normal']      & movimiento['nulo'],   riesgo['normal'])
+rule2 = ctrl.Rule(spo2['normal']    & hr['normal']      & movimiento['leve'],   riesgo['normal'])
 
-riesgo_ctrl = ctrl.ControlSystem([rule1, rule2, rule3, rule4, rule5])
+# Nivel LEVE — desaturación leve o HR ligeramente elevada
+rule3 = ctrl.Rule(spo2['moderado']  & hr['normal'],                             riesgo['leve'])
+rule4 = ctrl.Rule(spo2['normal']    & hr['elevada']     & movimiento['leve'],   riesgo['leve'])
+rule5 = ctrl.Rule(spo2['moderado']  & movimiento['normal'],                     riesgo['leve'])
+
+# Nivel MODERADO — desaturación significativa o bradicardia
+rule6 = ctrl.Rule(spo2['peligroso'] & hr['normal'],                             riesgo['moderado'])
+rule7 = ctrl.Rule(spo2['moderado']  & hr['bradicardia'],                        riesgo['moderado'])
+rule8 = ctrl.Rule(spo2['peligroso'] & hr['elevada']     & movimiento['nulo'],   riesgo['moderado'])
+
+# Nivel CRÍTICO — hipoxia severa, taquicardia refleja o bradicardia extrema
+rule9  = ctrl.Rule(spo2['critico'],                                              riesgo['critico'])
+rule10 = ctrl.Rule(spo2['peligroso'] & hr['taquicardia'] & movimiento['nulo'],  riesgo['critico'])
+rule11 = ctrl.Rule(spo2['peligroso'] & hr['bradicardia'],                       riesgo['critico'])
+
+riesgo_ctrl = ctrl.ControlSystem([
+    rule1, rule2, rule3, rule4, rule5,
+    rule6, rule7, rule8, rule9, rule10, rule11
+])
 riesgo_simulador = ctrl.ControlSystemSimulation(riesgo_ctrl)
 
 # ---------------------------------------------------------
@@ -66,8 +101,8 @@ prolog.consult("reglas_apnea.pl")
 def leer_sensores():
     # Retorna datos de los sensores I2C. Para el desarrollo se usan datos simulados.
     return {
-        'spo2': np.random.uniform(80, 99),
-        'hr': np.random.uniform(45, 110),
+        'spo2':       np.random.uniform(75, 100),  # Rango realista incluyendo desaturaciones
+        'hr':         np.random.uniform(30, 120),   # Rango realista sueño: bradicardia a taquicardia
         'movimiento': np.random.uniform(0, 10)
     }
 
