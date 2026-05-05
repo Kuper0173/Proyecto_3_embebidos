@@ -1,1 +1,5 @@
+numpy
+scikit-fuzzy
+pyswip
 smbus2
+RPi.GPIO

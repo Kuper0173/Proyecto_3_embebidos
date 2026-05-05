@@ -4,10 +4,10 @@
 % 1. DEFINICIÓN DE ESTADOS CLÍNICOS
 % ---------------------------------------------------------
 % Evalúa el nivel de riesgo (0 - 100) y asigna una etiqueta de estado.
-estado(verde, Nivel) :- Nivel < 25.
-estado(amarillo, Nivel) :- Nivel >= 25, Nivel < 50.
-estado(rojo, Nivel) :- Nivel >= 50, Nivel < 75.
-estado(emergencia, Nivel) :- Nivel >= 75.
+estado(verde, Nivel) :- Nivel < 22.
+estado(amarillo, Nivel) :- Nivel >= 22, Nivel < 50.
+estado(rojo, Nivel) :- Nivel >= 50, Nivel < 74.
+estado(emergencia, Nivel) :- Nivel >= 74.
 
 % ---------------------------------------------------------
 % 2. ACCIONES DE HARDWARE Y CONSOLA
