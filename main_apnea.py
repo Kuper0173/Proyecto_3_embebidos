@@ -419,13 +419,16 @@ prolog.consult("reglas_apnea.pl")
 GPIO.setwarnings(False)
 GPIO.setmode(GPIO.BCM)
 
+# Limpia pines que hayan quedado configurados por este proceso
+GPIO.cleanup()
+
 PINES_LED = {'R': 17, 'G': 27, 'B': 22}
 PIN_BUZZER = 23
 
-# LED RGB de cátodo común:
-# GPIO.HIGH enciende el canal, GPIO.LOW lo apaga.
 for pin in PINES_LED.values():
     GPIO.setup(pin, GPIO.OUT, initial=GPIO.LOW)
+
+GPIO.setup(PIN_BUZZER, GPIO.OUT, initial=GPIO.LOW)
 
 # Buzzer activo en alto:
 # GPIO.HIGH enciende, GPIO.LOW apaga.
