@@ -449,7 +449,7 @@ GPIO.setup(PIN_BUZZER, GPIO.OUT, initial=GPIO.LOW)
 # FUNCION PRINCIPAL DE LECTURA DE SENSORES
 # =========================================================
 
-def leer_sensores(ventana_s=8, fs=50):
+def leer_sensores(ventana_s=5, fs=50):
     """
     Lee MAX30105 y MPU6050 durante una ventana temporal.
 
