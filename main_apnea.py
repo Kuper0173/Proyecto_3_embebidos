@@ -147,15 +147,15 @@ class MPU6050:
     def inicializar(self) -> None:
         who_am_i = self.read_reg(REG_WHO_AM_I)
 
-    # El MPU6050 clásico suele devolver 0x68.
-    # Algunos módulos compatibles pueden devolver otro ID, como 0x72,
-    # aunque mantengan registros básicos compatibles.
         if who_am_i not in (0x68, 0x69, 0x72):
             raise RuntimeError(f"IMU no detectada o no compatible. WHO_AM_I=0x{who_am_i:02X}")
 
         if who_am_i != 0x68:
-            print(f"[ADVERTENCIA] IMU detectada en 0x{self.address:02X} con WHO_AM_I=0x{who_am_i:02X}. "
-              "Se intentara usar como compatible con MPU6050.")
+            print(
+            f"[ADVERTENCIA] IMU detectada en 0x{self.address:02X} "
+            f"con WHO_AM_I=0x{who_am_i:02X}. "
+            "Se intentara usar como compatible con MPU6050."
+        )
 
     # Despertar MPU/IMU
         self.write_reg(REG_PWR_MGMT_1, 0x00)
@@ -523,41 +523,68 @@ def actualizar_hardware(r, g, b, buzzer):
 # ---------------------------------------------------------
 if __name__ == '__main__':
     print("Iniciando Sistema de Detección de Apnea...")
+
+    bus = None
+
     try:
+        bus = SMBus(I2C_BUS)
+        max_sensor = MAX30105(bus)
+        mpu_sensor = MPU6050(bus)
+
         while True:
             datos = leer_sensores()
-            
-            # Evaluar el riesgo con el simulador difuso
+
             riesgo_simulador.input['spo2'] = datos['spo2']
             riesgo_simulador.input['hr'] = datos['hr']
             riesgo_simulador.input['movimiento'] = datos['movimiento']
             riesgo_simulador.compute()
-            
+
             nivel_riesgo = riesgo_simulador.output['riesgo']
-            
-            # Consulta a la base de hechos en Prolog
-            query = f"accion(Color, {nivel_riesgo}, Mensaje, R, G, B, Buzzer)"
+
+            query = f"accion(Color, {nivel_riesgo:.2f}, Mensaje, R, G, B, Buzzer)"
             resultados = list(prolog.query(query))
-            
+
             if resultados:
                 res = resultados[0]
+
                 color = res['Color'].decode('utf-8') if isinstance(res['Color'], bytes) else res['Color']
                 mensaje = res['Mensaje'].decode('utf-8') if isinstance(res['Mensaje'], bytes) else res['Mensaje']
-                r, g, b = res['R'], res['G'], res['B']
-                buzzer = res['Buzzer']
-                
+
+                r = int(res['R'])
+                g = int(res['G'])
+                b = int(res['B'])
+                buzzer = int(res['Buzzer'])
+
                 actualizar_hardware(r, g, b, buzzer)
-                
-                # Consola iterativa
+
                 if color == 'emergencia':
-                    print(f"[!] {mensaje} | Riesgo: {nivel_riesgo:.1f} | SpO2: {datos['spo2']:.1f}% | HR: {datos['hr']:.1f} | Buzzer: ON")
+                    print(
+                        f"[!] {mensaje} | Riesgo: {nivel_riesgo:.1f} | "
+                        f"SpO2: {datos['spo2']:.1f}% | HR: {datos['hr']:.1f} | Buzzer: ON"
+                    )
                 else:
-                    print(f"[{color.upper()}] {mensaje} | Riesgo: {nivel_riesgo:.1f}")
-                    
-            # Control de muestreo (clk interno)
+                    print(
+                        f"[{str(color).upper()}] {mensaje} | Riesgo: {nivel_riesgo:.1f} | "
+                        f"SpO2: {datos['spo2']:.1f}% | HR: {datos['hr']:.1f} | "
+                        f"Mov: {datos['movimiento']:.1f}"
+                    )
+
+            riesgo_simulador.reset()
             time.sleep(1.0)
-            
+
     except KeyboardInterrupt:
         print("Deteniendo sistema...")
-        actualizar_hardware(0, 0, 0, 0)
+
+    except Exception as error:
+        print(f"[ERROR CRITICO] {error}")
+
+    finally:
+        try:
+            actualizar_hardware(0, 0, 0, 0)
+        except Exception:
+            pass
+
         GPIO.cleanup()
+
+        if bus is not None:
+            bus.close()
