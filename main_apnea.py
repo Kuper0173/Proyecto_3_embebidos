@@ -438,7 +438,7 @@ PINES_LED = {
 
 # Buzzer de dos pines.
 # Cambia a 24 si GPIO23 sigue ocupado.
-PIN_BUZZER = 24
+PIN_BUZZER = 25
 
 for pin in PINES_LED.values():
     GPIO.setup(pin, GPIO.OUT, initial=GPIO.LOW)
