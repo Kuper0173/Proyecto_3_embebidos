@@ -418,11 +418,18 @@ prolog.consult("reglas_apnea.pl")
 
 GPIO.setwarnings(False)
 GPIO.setmode(GPIO.BCM)
+
 PINES_LED = {'R': 17, 'G': 27, 'B': 22}
 PIN_BUZZER = 23
+
+# LED RGB de cátodo común:
+# GPIO.HIGH enciende el canal, GPIO.LOW lo apaga.
 for pin in PINES_LED.values():
-    GPIO.setup(pin, GPIO.OUT)
-GPIO.setup(PIN_BUZZER, GPIO.OUT)
+    GPIO.setup(pin, GPIO.OUT, initial=GPIO.LOW)
+
+# Buzzer activo en alto:
+# GPIO.HIGH enciende, GPIO.LOW apaga.
+GPIO.setup(PIN_BUZZER, GPIO.OUT, initial=GPIO.LOW)
 
 # =========================================================
 # FUNCION PRINCIPAL DE LECTURA DE SENSORES
@@ -488,11 +495,14 @@ def leer_sensores(ventana_s=8, fs=50):
         return ultima_lectura
 
 def actualizar_hardware(r, g, b, buzzer):
-    # Lógica física de encendido
-    GPIO.output(PINES_LED['R'], r)
-    GPIO.output(PINES_LED['G'], g)
-    GPIO.output(PINES_LED['B'], b)
-    GPIO.output(PIN_BUZZER, buzzer)
+    """
+    Actualiza LED RGB de cátodo común y buzzer activo en alto.
+    """
+
+    GPIO.output(PINES_LED['R'], GPIO.HIGH if r else GPIO.LOW)
+    GPIO.output(PINES_LED['G'], GPIO.HIGH if g else GPIO.LOW)
+    GPIO.output(PINES_LED['B'], GPIO.HIGH if b else GPIO.LOW)
+    GPIO.output(PIN_BUZZER, GPIO.HIGH if buzzer else GPIO.LOW)
 
 # ---------------------------------------------------------
 # 4. BUCLE PRINCIPAL
