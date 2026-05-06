@@ -566,6 +566,11 @@ if __name__ == '__main__':
             query = f"accion(Color, {nivel_riesgo:.2f}, Mensaje, R, G, B, Buzzer)"
             resultados = list(prolog.query(query))
 
+            sugerencia = sugerencia_atencion_medica(
+            nivel_riesgo=nivel_riesgo,
+            spo2=datos['spo2']
+            )
+
             if resultados:
                 res = resultados[0]
 
@@ -579,29 +584,38 @@ if __name__ == '__main__':
 
                 actualizar_hardware(r, g, b, buzzer)
 
-                sugerencia = sugerencia_atencion_medica(
-                nivel_riesgo=nivel_riesgo,
-                spo2=datos['spo2']
-            )
-                
                 if color == 'emergencia':
                     print(
-                    f"[!] {mensaje} | Riesgo: {nivel_riesgo:.1f} | "
+                        f"[!] {mensaje} | "
+                        f"Riesgo: {nivel_riesgo:.1f} | "
+                        f"SpO2: {datos['spo2']:.1f}% | "
+                        f"HR: {datos['hr']:.1f} BPM | "
+                        f"Mov: {datos['movimiento']:.1f} | "
+                        f"Buzzer: ON"
+                    )
+                    
+                else:
+                    print(
+                        f"[{str(color).upper()}] {mensaje} | "
+                        f"Riesgo: {nivel_riesgo:.1f} | "
+                        f"SpO2: {datos['spo2']:.1f}% | "
+                        f"HR: {datos['hr']:.1f} BPM | "
+                        f"Mov: {datos['movimiento']:.1f} | "
+                        f"Buzzer: {'ON' if buzzer else 'OFF'}"
+                    )
+
+            else:
+                actualizar_hardware(0, 0, 0, 0)
+
+                print(
+                    f"[SIN_REGLA_PROLOG] Prolog no devolvio una accion | "
+                    f"Riesgo: {nivel_riesgo:.1f} | "
                     f"SpO2: {datos['spo2']:.1f}% | "
                     f"HR: {datos['hr']:.1f} BPM | "
                     f"Mov: {datos['movimiento']:.1f} | "
-                    f"Buzzer: ON"
+                    f"Buzzer: OFF"
                 )
-                print(sugerencia)
-
-            else:
-                print(
-                        f"[{str(color).upper()}] {mensaje} | Riesgo: {nivel_riesgo:.1f} | "
-                        f"SpO2: {datos['spo2']:.1f}% | "
-                        f"HR: {datos['hr']:.1f} BPM | "
-                        f"Mov: {datos['movimiento']:.1f}"
-                    )
-                print(sugerencia)
+            print(sugerencia)
 
             riesgo_simulador.reset()
             time.sleep(1.0)
