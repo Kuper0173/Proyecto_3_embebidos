@@ -412,26 +412,37 @@ prolog = Prolog()
 prolog.consult("reglas_apnea.pl")
 
 # ---------------------------------------------------------
-# 3. RUTINAS DE HARDWARE (Mocks / Setup Raspberry Pi)
+# 3. RUTINAS DE HARDWARE - Raspberry Pi
 # ---------------------------------------------------------
-# Descomentar en entorno real de RPi
 
 GPIO.setwarnings(False)
+
+# Limpia configuraciones previas de GPIO de este proceso.
+# Debe hacerse ANTES de GPIO.setmode().
+try:
+    GPIO.cleanup()
+except Exception:
+    pass
+
+# Usamos numeración BCM: GPIO17, GPIO27, GPIO22, GPIO23, etc.
 GPIO.setmode(GPIO.BCM)
 
-# Limpia pines que hayan quedado configurados por este proceso
-GPIO.cleanup()
+# LED RGB de cátodo común:
+# 1 = canal encendido
+# 0 = canal apagado
+PINES_LED = {
+    'R': 17,
+    'G': 27,
+    'B': 22
+}
 
-PINES_LED = {'R': 17, 'G': 27, 'B': 22}
+# Buzzer de dos pines.
+# Cambia a 24 si GPIO23 sigue ocupado.
 PIN_BUZZER = 23
 
 for pin in PINES_LED.values():
     GPIO.setup(pin, GPIO.OUT, initial=GPIO.LOW)
 
-GPIO.setup(PIN_BUZZER, GPIO.OUT, initial=GPIO.LOW)
-
-# Buzzer activo en alto:
-# GPIO.HIGH enciende, GPIO.LOW apaga.
 GPIO.setup(PIN_BUZZER, GPIO.OUT, initial=GPIO.LOW)
 
 # =========================================================
