@@ -144,10 +144,32 @@ class MPU6050:
         value = (high << 8) | low
         return value - 65536 if value & 0x8000 else value
 
-    def inicializar(self) -> None:
-        who_am_i = self.read_reg(REG_WHO_AM_I)
-        if who_am_i not in (0x68, 0x69):
-            raise RuntimeError(f"MPU6050 no detectado. WHO_AM_I=0x{who_am_i:02X}")
+def inicializar(self) -> None:
+    who_am_i = self.read_reg(REG_WHO_AM_I)
+
+    # El MPU6050 clásico suele devolver 0x68.
+    # Algunos módulos compatibles pueden devolver otro ID, como 0x72,
+    # aunque mantengan registros básicos compatibles.
+    if who_am_i not in (0x68, 0x69, 0x72):
+        raise RuntimeError(f"IMU no detectada o no compatible. WHO_AM_I=0x{who_am_i:02X}")
+
+    if who_am_i != 0x68:
+        print(f"[ADVERTENCIA] IMU detectada en 0x{self.address:02X} con WHO_AM_I=0x{who_am_i:02X}. "
+              "Se intentara usar como compatible con MPU6050.")
+
+    # Despertar MPU/IMU
+        self.write_reg(REG_PWR_MGMT_1, 0x00)
+        time.sleep(0.1)
+
+    # Filtro digital y tasa de muestreo
+        self.write_reg(REG_SMPLRT_DIV, 0x07)
+        self.write_reg(REG_CONFIG, 0x03)
+
+    # Acelerometro ±2 g
+        self.write_reg(REG_ACCEL_CONFIG, 0x00)
+
+    # Giroscopio ±250 °/s
+        self.write_reg(REG_GYRO_CONFIG, 0x00)
 
         # Despertar MPU6050
         self.write_reg(REG_PWR_MGMT_1, 0x00)
