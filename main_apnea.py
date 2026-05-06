@@ -216,9 +216,9 @@ class MPU6050:
 # INICIALIZACION GLOBAL DE SENSORES
 # =========================================================
 
-bus = SMBus(I2C_BUS)
-max_sensor = MAX30105(bus)
-mpu_sensor = MPU6050(bus)
+bus = None
+max_sensor = None
+mpu_sensor = None
 
 # =========================================================
 # ULTIMA LECTURA VALIDA
