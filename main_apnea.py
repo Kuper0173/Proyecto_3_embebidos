@@ -518,6 +518,28 @@ def actualizar_hardware(r, g, b, buzzer):
     GPIO.output(PINES_LED['B'], GPIO.HIGH if b else GPIO.LOW)
     GPIO.output(PIN_BUZZER, GPIO.HIGH if buzzer else GPIO.LOW)
 
+def sugerencia_atencion_medica(nivel_riesgo, spo2):
+    """
+    Genera una recomendacion orientativa sobre el tiempo sugerido
+    para buscar atencion medica.
+
+    Importante:
+        Este sistema es academico/prototipo y no reemplaza
+        una evaluacion medica profesional.
+    """
+
+    if spo2 <= 88 or nivel_riesgo >= 70:
+        return "SUGERENCIA: Estado critico. Busca atencion medica inmediatamente o acude a urgencias."
+
+    elif spo2 <= 92 or nivel_riesgo >= 45:
+        return "SUGERENCIA: Estado moderado. Agenda una valoracion medica durante esta semana."
+
+    elif nivel_riesgo >= 25:
+        return "SUGERENCIA: Estado leve. Monitorea al paciente y considera consultar al medico si el evento se repite."
+
+    else:
+        return "SUGERENCIA: Estado normal. No se requiere atencion inmediata; continua el monitoreo."
+
 # ---------------------------------------------------------
 # 4. BUCLE PRINCIPAL
 # ---------------------------------------------------------
@@ -557,17 +579,29 @@ if __name__ == '__main__':
 
                 actualizar_hardware(r, g, b, buzzer)
 
+                sugerencia = sugerencia_atencion_medica(
+                nivel_riesgo=nivel_riesgo,
+                spo2=datos['spo2']
+            )
+                
                 if color == 'emergencia':
                     print(
-                        f"[!] {mensaje} | Riesgo: {nivel_riesgo:.1f} | "
-                        f"SpO2: {datos['spo2']:.1f}% | HR: {datos['hr']:.1f} | Buzzer: ON"
-                    )
-                else:
-                    print(
+                    f"[!] {mensaje} | Riesgo: {nivel_riesgo:.1f} | "
+                    f"SpO2: {datos['spo2']:.1f}% | "
+                    f"HR: {datos['hr']:.1f} BPM | "
+                    f"Mov: {datos['movimiento']:.1f} | "
+                    f"Buzzer: ON"
+                )
+                print(sugerencia)
+
+            else:
+                print(
                         f"[{str(color).upper()}] {mensaje} | Riesgo: {nivel_riesgo:.1f} | "
-                        f"SpO2: {datos['spo2']:.1f}% | HR: {datos['hr']:.1f} | "
+                        f"SpO2: {datos['spo2']:.1f}% | "
+                        f"HR: {datos['hr']:.1f} BPM | "
                         f"Mov: {datos['movimiento']:.1f}"
                     )
+                print(sugerencia)
 
             riesgo_simulador.reset()
             time.sleep(1.0)
