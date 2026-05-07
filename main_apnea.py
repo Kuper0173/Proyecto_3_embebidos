@@ -2,7 +2,6 @@ import time
 import numpy as np
 import skfuzzy as fuzz
 from skfuzzy import control as ctrl
-from pyswip import Prolog
 import RPi.GPIO as GPIO
 import math
 from smbus2 import SMBus
@@ -406,10 +405,41 @@ riesgo_ctrl = ctrl.ControlSystem([
 riesgo_simulador = ctrl.ControlSystemSimulation(riesgo_ctrl)
 
 # ---------------------------------------------------------
-# 2. CONEXIÓN CON PROLOG (Sistema Experto)
+# 2. SISTEMA EXPERTO — logica de alertas en Python
+#    (equivalente a reglas_apnea.pl, sin dependencia de Prolog)
 # ---------------------------------------------------------
-prolog = Prolog()
-prolog.consult("reglas_apnea.pl")
+# Umbrales sincronizados con reglas_apnea.pl:
+#   verde     : nivel < 25
+#   amarillo  : 25 <= nivel < 50
+#   rojo      : 50 <= nivel < 75
+#   emergencia: nivel >= 75
+#
+# Pines LED (R, G, B) y Buzzer igual que en el .pl:
+#   verde     -> (0, 1, 0, 0)  LED verde, sin buzzer
+#   amarillo  -> (1, 1, 0, 0)  LED amarillo (R+G), sin buzzer
+#   rojo      -> (1, 0, 0, 0)  LED rojo, sin buzzer
+#   emergencia-> (1, 0, 0, 1)  LED rojo + buzzer ON
+
+def nivel_a_alerta(nivel):
+    """
+    riesgo difuso (0-100) a una accion de hardware.
+    """
+    if nivel < 25:
+        return ('verde',
+                'Paciente estable. No se detectan anomalias respiratorias.',
+                0, 1, 0, 0)
+    elif nivel < 50:
+        return ('amarillo',
+                'PRECAUCION: Apnea moderada. Alteracion en SpO2 y HR.',
+                1, 1, 0, 0)
+    elif nivel < 75:
+        return ('rojo',
+                'PELIGRO: Apnea severa. Patrones anomalos prolongados.',
+                1, 0, 0, 0)
+    else:
+        return ('emergencia',
+                'CRITICO: Falla respiratoria aguda. URGENTE AL HOSPITAL.',
+                1, 0, 0, 1)
 
 # ---------------------------------------------------------
 # 3. RUTINAS DE HARDWARE - Raspberry Pi
@@ -563,58 +593,35 @@ if __name__ == '__main__':
 
             nivel_riesgo = riesgo_simulador.output['riesgo']
 
-            query = f"accion(Color, {nivel_riesgo:.2f}, Mensaje, R, G, B, Buzzer)"
-            resultados = list(prolog.query(query))
+            # Sistema experto en Python (reemplaza consulta Prolog)
+            color, mensaje, r, g, b, buzzer = nivel_a_alerta(nivel_riesgo)
 
             sugerencia = sugerencia_atencion_medica(
-            nivel_riesgo=nivel_riesgo,
-            spo2=datos['spo2']
+                nivel_riesgo=nivel_riesgo,
+                spo2=datos['spo2']
             )
 
-            if resultados:
-                res = resultados[0]
+            actualizar_hardware(r, g, b, buzzer)
 
-                color = res['Color'].decode('utf-8') if isinstance(res['Color'], bytes) else res['Color']
-                mensaje = res['Mensaje'].decode('utf-8') if isinstance(res['Mensaje'], bytes) else res['Mensaje']
-
-                r = int(res['R'])
-                g = int(res['G'])
-                b = int(res['B'])
-                buzzer = int(res['Buzzer'])
-
-                actualizar_hardware(r, g, b, buzzer)
-
-                if color == 'emergencia':
-                    print(
-                        f"[!] {mensaje} | "
-                        f"Riesgo: {nivel_riesgo:.1f} | "
-                        f"SpO2: {datos['spo2']:.1f}% | "
-                        f"HR: {datos['hr']:.1f} BPM | "
-                        f"Mov: {datos['movimiento']:.1f} | "
-                        f"Buzzer: ON"
-                    )
-                    
-                else:
-                    print(
-                        f"[{str(color).upper()}] {mensaje} | "
-                        f"Riesgo: {nivel_riesgo:.1f} | "
-                        f"SpO2: {datos['spo2']:.1f}% | "
-                        f"HR: {datos['hr']:.1f} BPM | "
-                        f"Mov: {datos['movimiento']:.1f} | "
-                        f"Buzzer: {'ON' if buzzer else 'OFF'}"
-                    )
-
-            else:
-                actualizar_hardware(0, 0, 0, 0)
-
+            if color == 'emergencia':
                 print(
-                    f"[SIN_REGLA_PROLOG] Prolog no devolvio una accion | "
+                    f"[!] {mensaje} | "
                     f"Riesgo: {nivel_riesgo:.1f} | "
                     f"SpO2: {datos['spo2']:.1f}% | "
                     f"HR: {datos['hr']:.1f} BPM | "
                     f"Mov: {datos['movimiento']:.1f} | "
-                    f"Buzzer: OFF"
+                    f"Buzzer: ON"
                 )
+            else:
+                print(
+                    f"[{color.upper()}] {mensaje} | "
+                    f"Riesgo: {nivel_riesgo:.1f} | "
+                    f"SpO2: {datos['spo2']:.1f}% | "
+                    f"HR: {datos['hr']:.1f} BPM | "
+                    f"Mov: {datos['movimiento']:.1f} | "
+                    f"Buzzer: {'ON' if buzzer else 'OFF'}"
+                )
+
             print(sugerencia)
 
             riesgo_simulador.reset()
